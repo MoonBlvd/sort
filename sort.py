@@ -173,15 +173,17 @@ def associate_detections_to_trackers(detections,trackers,iou_threshold = 0.3):
 
 
 class Sort(object):
-	def __init__(self,max_age=1,min_hits=3):
+	def __init__(self,max_age=1,min_hits=3,since_update_thresh=3):
 		"""
 		Sets key parameters for SORT
 		"""
 		self.max_age = max_age
 		self.min_hits = min_hits
+		self.since_update_thresh = since_update_thresh
 		self.trackers = []
 		self.frame_count = 0
-
+		self.KalmanBoxTracker = KalmanBoxTracker
+		self.KalmanBoxTracker.count = 0
 	def update(self,dets):
 		"""
 		Params:
@@ -207,27 +209,31 @@ class Sort(object):
 		matched, unmatched_dets, unmatched_trks = associate_detections_to_trackers(dets,trks)
 
 		#update matched trackers with assigned detections
+		new_matched = [] # this is used to save the matches between tracker id and detection index
 		for t,trk in enumerate(self.trackers):
 			if(t not in unmatched_trks):
 				d = matched[np.where(matched[:,1]==t)[0],0]
 				trk.update(dets[d,:][0])
+				new_matched.append([trk.id, int(d)])
 
 		#create and initialise new trackers for unmatched detections
 		for i in unmatched_dets:
-				trk = KalmanBoxTracker(dets[i,:]) 
+				trk = self.KalmanBoxTracker(dets[i,:]) 
 				self.trackers.append(trk)
+				new_matched.append([trk.id, i])
+                
 		i = len(self.trackers)
 		for trk in reversed(self.trackers):
 				d = trk.get_state()[0]
-				if((trk.time_since_update < 1) and (trk.hit_streak >= self.min_hits or self.frame_count <= self.min_hits)):
+				if((trk.time_since_update < self.since_update_thresh) and (trk.hit_streak >= self.min_hits or self.frame_count <= self.min_hits)):
 					ret.append(np.concatenate((d,[trk.id])).reshape(1,-1)) # +1 as MOT benchmark requires positive
 				i -= 1
 				#remove dead tracklet
 				if(trk.time_since_update > self.max_age):
 					self.trackers.pop(i)
 		if(len(ret)>0):
-			return matched, np.concatenate(ret)
-		return matched, np.empty((0,5))
+			return new_matched, np.concatenate(ret)
+		return new_matched, np.empty((0,5))
 		
 def parse_args():
 		"""Parse input arguments."""
